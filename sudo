@@ -1,8 +1,17 @@
 #!/bin/sh
+
+function fullpath
+{
+	cd "$1"
+	echo "$PWD"
+}
+
 cmd="$1"
 shift
-if [ ! -f "$cmd" ]
+if [ -f "$cmd" ]
 then
+	cmd=$(realpath "$cmd")
+else
 	fullcmd=$(which "$cmd")
 	if [ -z "$fullcmd" ]
 	then
