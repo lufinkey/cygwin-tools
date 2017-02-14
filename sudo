@@ -1,0 +1,16 @@
+#!/bin/sh
+cmd="$1"
+shift
+if [ ! -f "$cmd" ]
+then
+	fullcmd=$(which "$cmd")
+	if [ -z "$fullcmd" ]
+	then
+		echo "$cmd is not a valid command"
+		exit 1
+	else
+		cmd="$fullcmd"
+	fi
+fi
+mintty_path=$(cygpath -w "$(which mintty)")
+cygstart --wait --action=runas "$mintty_path" -i /Cygwin-Terminal.ico -e "$cmd" "$@"
