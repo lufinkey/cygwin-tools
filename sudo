@@ -31,4 +31,4 @@ args=$("$cmd_escape" "$args")
 rm -rf "$cmd_escape"
 
 # run command
-cygstart -w -d "$PWD" --action=runas "$mintty_path" -i /Cygwin-Terminal.ico -h always --dir "" --exec "/bin/bash" -p -c "$args"
+cygstart -w -d "$PWD" --action=runas "$mintty_path" -i /Cygwin-Terminal.ico -h always --dir "" --exec "/bin/sh" -c "$args"
