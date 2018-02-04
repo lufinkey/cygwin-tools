@@ -1,3 +1,3 @@
 #!/bin/bash
 mintty_path=$(cygpath -w "$(which mintty)")
-cygstart --wait --action=runas "$mintty_path" -i /Cygwin-Terminal.ico --dir "$PWD" -
+cygstart --wait --action=runas "$mintty_path" -i /Cygwin-Terminal.ico --dir "" -

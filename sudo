@@ -1,25 +1,34 @@
 #!/bin/sh
 
-function fullpath
-{
-	cd "$1"
-	echo "$PWD"
-}
+# create random string to help prevent clashing with other sudo calls
+randomstr=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
 
-cmd="$1"
-shift
-if [ -f "$cmd" ]
-then
-	cmd=$(realpath "$cmd")
-else
-	fullcmd=$(which "$cmd")
-	if [ -z "$fullcmd" ]
-	then
-		echo "$cmd is not a valid command"
-		exit 1
-	else
-		cmd="$fullcmd"
-	fi
-fi
+# get mintty path
 mintty_path=$(cygpath -w "$(which mintty)")
-cygstart --wait --action=runas "$mintty_path" -i /Cygwin-Terminal.ico -e "$cmd" "$@"
+
+# create temporary batch file
+cmd_escape="/tmp/cmd_escape_$randomstr.bat"
+cat > "$cmd_escape" << EOF
+@echo OFF
+setlocal ENABLEEXTENSIONS
+setlocal enableDelayedExpansion
+set "ESC_ARG=%1"
+@echo|set /p="%ESC_ARG%"
+EOF
+chmod +x "$cmd_escape"
+
+# escape command arguments
+esc_args=()
+for arg in "$@"
+do
+	esc_arg=$(printf "%q" "$arg")
+	esc_args+=("$esc_arg")
+done
+args=$(echo "${esc_args[*]}")
+args=$("$cmd_escape" "$args")
+
+# delete temporary batch file
+rm -rf "$cmd_escape"
+
+# run command
+cygstart -w -d "$PWD" --action=runas "$mintty_path" -i /Cygwin-Terminal.ico -h always --dir "" --exec "/bin/bash" -p -c "$args"
