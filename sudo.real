@@ -1,0 +1,11 @@
+#!/bin/bash
+
+cmd_id="$1"
+shift
+
+export PATH="/usr/local/bin:/usr/bin:$PATH"
+
+"$@" 1>"/tmp/cmd_stdout_$cmd_id.log" 2>"/tmp/cmd_stdout_$cmd_id.log"
+result=$?
+
+echo "$result" > "/tmp/cmd_result_$cmd_id"

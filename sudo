@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # create random string to help prevent clashing with other sudo calls
 randomstr=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
@@ -6,7 +6,7 @@ randomstr=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
 # get mintty path
 mintty_path=$(cygpath -w "$(which mintty)")
 
-# create temporary batch file
+# create temporary batch file to escape command parameters for ShellExecute
 cmd_escape="/tmp/cmd_escape_$randomstr.bat"
 cat > "$cmd_escape" << EOF
 @echo OFF
@@ -17,8 +17,21 @@ set "ESC_ARG=%1"
 EOF
 chmod +x "$cmd_escape"
 
+# tail the command's stdout and stderr
+stdout_path="/tmp/cmd_stdout_$randomstr.log"
+stderr_path="/tmp/cmd_stderr_$randomstr.log"
+result_path="/tmp/cmd_result_$randomstr"
+touch "$stdout_path"
+touch "$stderr_path"
+tail -f -s 0.1 "$stdout_path" &
+tail_s_pid=$!
+tail -f -s 0.1 "$stderr_path" 1>&2 &
+tail_e_pid=$!
+
 # escape command arguments
 esc_args=()
+esc_args+=("/usr/local/bin/sudo.real")
+esc_args+=("$randomstr")
 for arg in "$@"
 do
 	esc_arg=$(printf "%q" "$arg")
@@ -31,4 +44,26 @@ args=$("$cmd_escape" "$args")
 rm -rf "$cmd_escape"
 
 # run command
-cygstart -w -d "$PWD" --action=runas "$mintty_path" -i /Cygwin-Terminal.ico -h always --dir "" --exec "/bin/sh" -c "$args"
+cygstart -w -d "$PWD" --action=runas "$mintty_path" -i /Cygwin-Terminal.ico --dir "" --exec "/bin/sh" -c "$args"
+
+# wait for command result
+while [ ! -f "$result_path" ]
+do
+	sleep 0.1s
+done
+cmd_result=$(cat "/tmp/cmd_result_$randomstr")
+rm -rf "/tmp/cmd_result_$randomstr"
+
+# stop tailing stdout and stderr of command
+sleep 0.15s
+kill -15 $tail_s_pid &> /dev/null
+wait $tail_s_pid &> /dev/null
+kill -15 $tail_e_pid &> /dev/null
+wait $tail_e_pid &> /dev/null
+
+# delete stdout and stderr files
+rm -rf "$stdout_path"
+rm -rf "$stderr_path"
+
+# exit
+exit $cmd_result
