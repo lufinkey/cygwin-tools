@@ -51,8 +51,8 @@ while [ ! -f "$result_path" ]
 do
 	sleep 0.1s
 done
-cmd_result=$(cat "/tmp/cmd_result_$randomstr")
-rm -rf "/tmp/cmd_result_$randomstr"
+cmd_result=$(cat "$result_path")
+rm -rf "$result_path"
 
 # stop tailing stdout and stderr of command
 sleep 0.15s
