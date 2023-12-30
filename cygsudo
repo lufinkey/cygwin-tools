@@ -30,7 +30,7 @@ tail_e_pid=$!
 
 # escape command arguments
 esc_args=()
-esc_args+=("/usr/local/bin/sudo.real")
+esc_args+=("/usr/local/bin/cygsudo.real")
 esc_args+=("$randomstr")
 for arg in "$@"
 do
