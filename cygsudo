@@ -1,4 +1,6 @@
 #!/bin/bash
+self_script_path=$(realpath "${BASH_SOURCE[0]}")
+admin_script_path="$self_script_path.real"
 
 # create random string to help prevent clashing with other sudo calls
 randomstr=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
@@ -7,30 +9,21 @@ randomstr=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
 mintty_path=$(cygpath -w "$(which mintty)")
 
 # create temporary batch file to escape command parameters for ShellExecute
-cmd_escape="/tmp/cmd_escape_$randomstr.bat"
-cat > "$cmd_escape" << EOF
+cmd_escaper="/tmp/cygsudo_cmd_escaper_$randomstr.bat"
+# write script content into temporary file
+cat > "$cmd_escaper" << EOF
 @echo OFF
 setlocal ENABLEEXTENSIONS
 setlocal enableDelayedExpansion
 set "ESC_ARG=%1"
 @echo|set /p="%ESC_ARG%"
 EOF
-chmod +x "$cmd_escape"
-
-# tail the command's stdout and stderr
-stdout_path="/tmp/cmd_stdout_$randomstr.log"
-stderr_path="/tmp/cmd_stderr_$randomstr.log"
-result_path="/tmp/cmd_result_$randomstr"
-touch "$stdout_path"
-touch "$stderr_path"
-tail -f -s 0.1 "$stdout_path" &
-tail_s_pid=$!
-tail -f -s 0.1 "$stderr_path" 1>&2 &
-tail_e_pid=$!
+# ensure temporary script is executable
+chmod +x "$cmd_escaper"
 
 # escape command arguments
 esc_args=()
-esc_args+=("/usr/local/bin/cygsudo.real")
+esc_args+=("$admin_script_path")
 esc_args+=("$randomstr")
 for arg in "$@"
 do
@@ -38,10 +31,21 @@ do
 	esc_args+=("$esc_arg")
 done
 args=$(echo "${esc_args[*]}")
-args=$("$cmd_escape" "$args")
+args=$("$cmd_escaper" "$args")
 
 # delete temporary batch file
-rm -rf "$cmd_escape"
+rm -rf "$cmd_escaper"
+
+# tail the command's stdout and stderr
+stdout_path="/tmp/cygsudo_cmd_stdout_$randomstr.log"
+stderr_path="/tmp/cygsudo_cmd_stderr_$randomstr.log"
+result_path="/tmp/cygsudo_cmd_result_$randomstr"
+touch "$stdout_path"
+touch "$stderr_path"
+tail -f -s 0.1 "$stdout_path" &
+tail_s_pid=$!
+tail -f -s 0.1 "$stderr_path" 1>&2 &
+tail_e_pid=$!
 
 # run command
 cygstart -w -d "$PWD" --action=runas "$mintty_path" -i /Cygwin-Terminal.ico --dir "" --exec "/bin/sh" -c "$args"
