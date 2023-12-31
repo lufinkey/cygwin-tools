@@ -45,7 +45,7 @@ cmd_id=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
 verbose=false
 test_mode=false
 wait_on_finish=false
-pass_direct_input=false
+forward_stdin=false
 sleep_duration="0.1s"
 
 # parse arguments
@@ -99,11 +99,11 @@ while (( $# > 0 )); do
 			else
 				wait_on_finish=true
 			fi
-		elif [ "$flag_name" = "pass-direct-input" ]; then
+		elif [ "$flag_name" = "forward-stdin" ]; then
 			if $has_flag_val; then
-				pass_direct_input="$(parse_bool_arg "$flag_val")"
+				forward_stdin="$(parse_bool_arg "$flag_val")"
 			else
-				pass_direct_input=true
+				forward_stdin=false
 			fi
 		else
 			>&2 echo "unknown argument '$arg'"
@@ -145,7 +145,7 @@ EOF
 chmod +x "$cmd_escaper"
 
 # make a multiline string of the variables to pass
-passvars_arg="cmd_id=\"$cmd_id\" verbose=\"$verbose\" test_mode=\"$test_mode\" wait_on_finish=\"$wait_on_finish\" pass_direct_input=\"$pass_direct_input\""
+passvars_arg="cmd_id=\"$cmd_id\" verbose=\"$verbose\" test_mode=\"$test_mode\" wait_on_finish=\"$wait_on_finish\" use_forwarded_stdin=\"$forward_stdin\""
 if $verbose; then
 	>&2 echo "passed variables argument is:"
 	>&2 echo -e "\t$passvars_arg"
@@ -184,7 +184,7 @@ stdin_path="/tmp/cygsudo_cmd_stdin_$cmd_id"
 stdout_path="/tmp/cygsudo_cmd_stdout_$cmd_id.log"
 stderr_path="/tmp/cygsudo_cmd_stderr_$cmd_id.log"
 result_path="/tmp/cygsudo_cmd_result_$cmd_id"
-if $pass_direct_input; then
+if $forward_stdin; then
 	touch "$stdin_path"
 fi
 touch "$stdout_path"
@@ -222,7 +222,7 @@ fi
 # check if cygstart was successful
 if [ $cygstart_result -eq 0 ]; then
 	# pipe stdin to temporary file if needed
-	if $pass_direct_input; then
+	if $forward_stdin; then
 		{ stdbuf -o0 cat - <&3 3<&- 1>"$stdin_path" 2>/dev/null & } 3<&0
 
 		# wait for pid
@@ -247,7 +247,7 @@ if [ $cygstart_result -eq 0 ]; then
 fi
 
 # close stdin if needed
-if $pass_direct_input; then
+if $forward_stdin; then
 	exec 0<&-
 fi
 
