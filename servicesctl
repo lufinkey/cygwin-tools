@@ -1,0 +1,36 @@
+#!/bin/bash
+
+command="$1"
+svc_name="$2"
+shift
+shift
+
+if [ "$command" = "start" ]; then
+	# start
+	net start "$svc_name"
+elif [ "$command" = "stop" ]; then
+	# stop
+	net stop "$svc_name"
+elif [ "$command" = "restart" ]; then
+	# restart
+	net stop "$svc_name" && net start "$svc_name"
+elif [ "$command" = "pause" ]; then
+	# pause
+	net pause "$svc_name"
+elif [ "$command" = "resume" ]; then
+	# resume
+	net 'continue' "$svc_name"
+elif [ "$command" = "enable" ]; then
+	# enable
+	sc config "$svc_name" start= auto
+elif [ "$command" = "disable" ]; then
+	# disable
+	sc config "$svc_name" start= disabled
+elif [ "$command" = "set-startup" ]; then
+	# set-startup
+	startup_type="$1"
+	shift
+	sc config "$svc_name" start="$startup_type"
+else
+	>&2 echo "unknown command $command"
+fi
