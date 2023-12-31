@@ -5,25 +5,52 @@ shift
 
 # announce launch
 if $verbose; then
-    >&2 echo -e "cygsudo.real launched\n\tPATH=$PATH\n\tUID=$UID"
+	>&2 echo -e "cygsudo.real launched\n\tPATH=$PATH\n\tUID=$UID"
 fi
+
+# get variables
+pid_path="/tmp/cygsudo_cmd_pid_$cmd_id"
+stdin_path="/tmp/cygsudo_cmd_stdin_$cmd_id"
+stdout_path="/tmp/cygsudo_cmd_stdout_$cmd_id.log"
+stderr_path="/tmp/cygsudo_cmd_stderr_$cmd_id.log"
+result_path="/tmp/cygsudo_cmd_result_$cmd_id"
 
 # prepend to path
 if $verbose; then
-    >&2 echo "prepending default binary directories to the base of the path"
+	>&2 echo "prepending default binary directories to the base of the path"
 fi
 export PATH="/usr/local/bin:/usr/bin:$PATH"
 
 # execute command
 if $verbose; then
-    >&2 echo "executing" "$@"
+	>&2 echo "executing" "$@"
 fi
-"$@" 1>"/tmp/cygsudo_cmd_stdout_$cmd_id.log" 2>"/tmp/cygsudo_cmd_stdout_$cmd_id.log"
-result=$?
+if $pass_direct_input; then
+	tail -f -s 0.1 -n +1 "$stdin_path" | stdbuf -i0 "$@" 1>"$stdout_path" 2>"$stderr_path" &
+	pid=$!
+	if $verbose; then
+		>&2 echo "pid is $pid"
+	fi
+    # output PID and wait for command to finish
+    echo "$pid" > "$pid_path"
+    if $verbose; then
+        >&2 echo "waiting for $pid to exit"
+    fi
+    wait $pid
+    result=$?
+else
+	"$@" 1>"$stdout_path" 2>"$stderr_path"
+    result=$?
+fi
 
-# store result
-result_file="/tmp/cygsudo_cmd_result_$cmd_id"
+# output and store result
 if $verbose; then
-    >&2 echo "storing result $result in $result_file"
+	>&2 echo "command exited with result $result"
+	>&2 echo "storing result in $result_path"
 fi
-echo "$result" > "$result_file"
+echo "$result" > "$result_path"
+
+# wait on finish if specified
+if $wait_on_finish; then
+	read -p "press enter to continue"
+fi

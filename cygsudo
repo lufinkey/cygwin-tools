@@ -39,11 +39,14 @@ function parse_bool_arg() {
 }
 
 # create random string to help prevent clashing with other sudo calls
-randomstr=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
+cmd_id=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
 
 # set default values for options
 verbose=false
 test_mode=false
+wait_on_finish=false
+pass_direct_input=false
+sleep_duration="0.1s"
 
 # parse arguments
 param_count=0
@@ -90,6 +93,18 @@ while (( $# > 0 )); do
 			else
 				test_mode=true
 			fi
+		elif [ "$flag_name" = "wait-on-finish" ]; then
+			if $has_flag_val; then
+				wait_on_finish="$(parse_bool_arg "$flag_val")"
+			else
+				wait_on_finish=true
+			fi
+		elif [ "$flag_name" = "pass-direct-input" ]; then
+			if $has_flag_val; then
+				pass_direct_input="$(parse_bool_arg "$flag_val")"
+			else
+				pass_direct_input=true
+			fi
 		else
 			>&2 echo "unknown argument '$arg'"
 		fi
@@ -118,7 +133,7 @@ while (( $# > 0 )); do
 done
 
 # create temporary batch file to escape command parameters for ShellExecute
-cmd_escaper="/tmp/cygsudo_cmd_escaper_$randomstr.bat"
+cmd_escaper="/tmp/cygsudo_cmd_escaper_$cmd_id.bat"
 # write script content into temporary file
 cat > "$cmd_escaper" << EOF
 @echo OFF
@@ -130,8 +145,7 @@ EOF
 chmod +x "$cmd_escaper"
 
 # make a multiline string of the variables to pass
-passvars_arg="cmd_id=\"$randomstr\" verbose=\"$verbose\" test_mode=\"$test_mode\""
-# passvars_arg="$("$cmd_escaper" "$passvars_arg")"
+passvars_arg="cmd_id=\"$cmd_id\" verbose=\"$verbose\" test_mode=\"$test_mode\" wait_on_finish=\"$wait_on_finish\" pass_direct_input=\"$pass_direct_input\""
 if $verbose; then
 	>&2 echo "passed variables argument is:"
 	>&2 echo -e "\t$passvars_arg"
@@ -165,22 +179,28 @@ if $test_mode; then
 fi
 
 # tail the command's stdout and stderr
-stdout_path="/tmp/cygsudo_cmd_stdout_$randomstr.log"
-stderr_path="/tmp/cygsudo_cmd_stderr_$randomstr.log"
-result_path="/tmp/cygsudo_cmd_result_$randomstr"
+pid_path="/tmp/cygsudo_cmd_pid_$cmd_id"
+stdin_path="/tmp/cygsudo_cmd_stdin_$cmd_id"
+stdout_path="/tmp/cygsudo_cmd_stdout_$cmd_id.log"
+stderr_path="/tmp/cygsudo_cmd_stderr_$cmd_id.log"
+result_path="/tmp/cygsudo_cmd_result_$cmd_id"
+if $pass_direct_input; then
+	touch "$stdin_path"
+fi
 touch "$stdout_path"
 touch "$stderr_path"
 if $verbose; then
 	>&2 echo "created temporary files to tail for stdout and stderr"
+	>&2 echo "stdin file is $stdin_path"
 	>&2 echo "stdout file is $stdout_path"
 	>&2 echo "stderr file is $stderr_path"
 fi
-tail -f -s 0.1 "$stdout_path" &
+tail -f -s 0.1 -n +1 "$stdout_path" &
 tail_s_pid=$!
 if $verbose; then
 	>&2 echo "tailing temporary stdout file $stdout_path (tail pid is $tail_s_pid)"
 fi
-tail -f -s 0.1 "$stderr_path" 1>&2 &
+tail -f -s 0.1 -n +1 "$stderr_path" 1>&2 &
 tail_e_pid=$!
 if $verbose; then
 	>&2 echo "tailing temporary stderr file $stderr_path (tail pid is $tail_e_pid)"
@@ -193,31 +213,54 @@ if $verbose; then
 	>&2 echo "running command via cygstart:"
 	>&2 echo -e "\t$command"
 fi
-cygstart --wait --directory "$PWD" "$cygstart_args" --action=runas "$mintty_path" -i /Cygwin-Terminal.ico --dir "" --exec "/bin/sh" -c "$command"
+cygstart --wait --directory "$PWD" $cygstart_args --action=runas "$mintty_path" -i /Cygwin-Terminal.ico --dir "" --exec "/bin/sh" -c "$command"
 cygstart_result=$?
 if $verbose; then
 	>&2 echo "cygstart exited with result $cygstart_result"
 fi
 
-# wait for command result
-if $verbose; then
-	>&2 echo "waiting for command result in temporary file $result_path"
+# check if cygstart was successful
+if [ $cygstart_result -eq 0 ]; then
+	# pipe stdin to temporary file if needed
+	if $pass_direct_input; then
+		{ stdbuf -o0 cat - <&3 3<&- 1>"$stdin_path" 2>/dev/null & } 3<&0
+
+		# wait for pid
+		if $verbose; then
+			>&2 echo "waiting for pid in temporary file $pid_path"
+		fi
+		while [ ! -f "$pid_path" ]
+		do
+			sleep "$sleep_duration"
+		done
+		pid=$(cat "$pid_path")
+	fi
+
+	# wait for command result
+	if $verbose; then
+		>&2 echo "waiting for command result in temporary file $result_path"
+	fi
+	while [ ! -f "$result_path" ]
+	do
+		sleep "$sleep_duration"
+	done
 fi
-while [ ! -f "$result_path" ]
-do
-	sleep 0.1s
-done
+
+# close stdin if needed
+if $pass_direct_input; then
+	exec 0<&-
+fi
 
 # command has finished
 cmd_result=$(cat "$result_path")
 if $verbose; then
 	>&2 echo "finished command with result $cmd_result"
-	>&2 echo "deleting temporary result file $result_path"
+	>&2 echo "deleting temporary result file"
 fi
 rm -rf "$result_path"
 
 # stop tailing stdout and stderr of command
-sleep 0.15s
+sleep "$sleep_duration"
 kill -15 $tail_s_pid &> /dev/null
 wait $tail_s_pid &> /dev/null
 kill -15 $tail_e_pid &> /dev/null
@@ -225,10 +268,9 @@ wait $tail_e_pid &> /dev/null
 
 # delete stdout and stderr files
 if $verbose; then
-	>&2 echo "deleting temporary stdout and stderr files"
+	>&2 echo "deleting temporary pid, stdin, stdout, and stderr files"
 fi
-rm -rf "$stdout_path"
-rm -rf "$stderr_path"
+rm -rf "$pid_path" "$stdin_path" "$stdout_path" "$stderr_path"
 
 # exit
 exit $cmd_result
