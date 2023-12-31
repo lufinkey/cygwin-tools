@@ -18,6 +18,6 @@ Some helper scripts for Cygwin
 
 	Starts an elevated login shell in a new window.
 
-* **servicesctl** [ [start|stop|restart|pause|resume] *service-name* ] | [ set-startup *startup-type* ]
+* **servicesctl** [ [ start | stop | restart | pause | resume | enable | disable ] *service-name* ] | [ set-startup *startup-type* ]
 
 	Manages windows services
