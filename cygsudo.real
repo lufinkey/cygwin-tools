@@ -40,7 +40,7 @@ if $pass_direct_input; then
     result=$?
 else
 	"$@" 1>"$stdout_path" 2>"$stderr_path"
-    result=$?
+	result=$?
 fi
 
 # output and store result
