@@ -10,10 +10,14 @@ Some helper scripts for Cygwin
 
 ## Usage
 
-* **sudo** [*command*]
+* **cygsudo** [--verbose] [--pass-direct-input] [*command*]
 
 	Run a command with elevated privileges in a new window.
 
-* **su**
+* **cygsu**
 
 	Starts an elevated login shell in a new window.
+
+* **servicesctl** [ [start|stop|restart|pause|resume] *service-name* ] | [ set-startup *startup-type* ]
+
+	Manages windows services
