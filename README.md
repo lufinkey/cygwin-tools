@@ -10,7 +10,7 @@ Some helper scripts for Cygwin
 
 ## Usage
 
-* **cygsudo** [--verbose] [--pass-direct-input] [*command*]
+* **cygsudo** [--verbose] [--pass-direct-input] *command*
 
 	Run a command with elevated privileges in a new window.
 
