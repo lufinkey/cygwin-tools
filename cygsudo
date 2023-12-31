@@ -103,7 +103,7 @@ while (( $# > 0 )); do
 			if $has_flag_val; then
 				forward_stdin="$(parse_bool_arg "$flag_val")"
 			else
-				forward_stdin=false
+				forward_stdin=true
 			fi
 		else
 			>&2 echo "unknown argument '$arg'"
