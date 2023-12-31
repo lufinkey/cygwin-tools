@@ -2,22 +2,10 @@
 self_script_path=$(realpath "${BASH_SOURCE[0]}")
 self_script_dir=$(dirname "$self_script_path")
 admin_script_path="$self_script_path.real"
-
-# get mintty and cygwin paths
-mintty_path=$(cygpath -w "$(which mintty)")
 cygwin_root=$(cygpath -w "/")
-batch_escaper_name="escape-batch-param.bat"
-batch_escaper_path="$self_script_dir/$batch_escaper_name"
-if [ ! -f "$batch_escaper_path" ]; then
-	if which "$batch_escaper_name"; then
-		batch_escaper_path=$batch_escaper_name
-	else
-		batch_escaper_path=
-	fi
-fi
-
 
 # helper functions
+
 function strindex() {
 	local str="$1"
 	local find_str="$2"
@@ -32,6 +20,23 @@ function strindex() {
 		echo $(($start_index + ${#x}))
 	else
 		echo ${#x}
+	fi
+}
+
+function resolve_script() {
+	script_name="$1"
+	script_path="$self_script_dir/$script_name"
+	if [ -f "$script_path" ]; then
+		echo "$script_path"
+		return 0
+	else
+		if which "$script_name"; then
+			echo "$script_name"
+			return 0
+		else
+			echo ""
+			return 1
+		fi
 	fi
 }
 
@@ -67,6 +72,13 @@ function parse_bool_arg() {
 	fi
 }
 
+# get paths for dependent scripts
+mintty_path=$(cygpath -w "$(which mintty)")
+batch_escaper_name="escape-batch-param.bat"
+batch_escaper_path=$(resolve_script "$batch_escaper_name")
+amiadmin_name="amiadmin"
+amiadmin_path=$(resolve_script "$amiadmin_name")
+
 # create random string to help prevent clashing with other sudo calls
 cmd_id=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
 
@@ -77,7 +89,9 @@ wait_on_finish=false
 stdin_mode="none"
 stdin_modes=( "none" "pipe" "file" )
 sleep_duration="0.1s"
+tail_interval="0.05"
 with_mintty=false
+force_sudo=false
 
 # parse arguments
 param_count=0
@@ -123,6 +137,12 @@ while (( $# > 0 )); do
 				test_mode="$(parse_bool_arg "$flag_val")"
 			else
 				test_mode=true
+			fi
+		elif [ "$flag_name" = "force" ]; then
+			if $has_flag_val; then
+				force_sudo="$(parse_bool_arg "$flag_val")"
+			else
+				force_sudo=true
 			fi
 		elif [ "$flag_name" = "wait-on-finish" ]; then
 			if $has_flag_val; then
@@ -175,6 +195,25 @@ while (( $# > 0 )); do
 	shift
 done
 
+# ensure a command was given
+if [ -z "$1" ]; then
+	>&2 echo "no command was given"
+	exit 1
+fi
+
+# check if we even need to elevate privileges for this task
+if ! $force_sudo && [ ! -z "$amiadmin_path" ]; then
+	is_admin_state=$(amiadmin)
+	if $verbose; then
+		>&2 echo "amiadmin?: $is_admin_state"
+	fi
+	if [ "$is_admin_state" == "yes" ]; then
+		# already admin, so just call the command and exit
+		"$@"
+		exit $?
+	fi
+fi
+
 # make a multiline string of the variables to pass
 passvars_arg="cmd_id=\"$cmd_id\" verbose=\"$verbose\" test_mode=\"$test_mode\" wait_on_finish=\"$wait_on_finish\" stdin_mode=\"$stdin_mode\""
 if $verbose; then
@@ -192,7 +231,6 @@ do
 	esc_args+=( "$esc_arg" )
 done
 command=$(echo "${esc_args[*]}")
-# command="${command//=/\^=}"
 if $verbose; then
 	>&2 echo "joined command (before escaping) is:"
 	>&2 echo $'\t'"$command"
@@ -227,12 +265,12 @@ if $verbose; then
 	>&2 echo "stdout file is $stdout_path"
 	>&2 echo "stderr file is $stderr_path"
 fi
-tail -f -s 0.1 -n +1 "$stdout_path" &
+tail -f -s "$tail_interval" -n +1 "$stdout_path" &
 tail_s_pid=$!
 if $verbose; then
 	>&2 echo "tailing temporary stdout file $stdout_path (tail pid is $tail_s_pid)"
 fi
-tail -f -s 0.1 -n +1 "$stderr_path" 1>&2 &
+tail -f -s "$tail_interval" -n +1 "$stderr_path" 1>&2 &
 tail_e_pid=$!
 if $verbose; then
 	>&2 echo "tailing temporary stderr file $stderr_path (tail pid is $tail_e_pid)"

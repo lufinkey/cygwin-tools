@@ -26,7 +26,7 @@ if $verbose; then
 	>&2 echo "executing" "$@"
 fi
 if [ "$stdin_mode" == "file" ]; then
-	tail -f -s 0.1 -n +1 "$stdin_path" | stdbuf -i0 "$@" 1>"$stdout_path" 2>"$stderr_path" &
+	tail -f -s 0.1 -n +1 "$stdin_path" | stdbuf -i0 -o0 "$@" 1>"$stdout_path" 2>"$stderr_path" &
 	pid=$!
 	if $verbose; then
 		>&2 echo "pid is $pid"
