@@ -31,16 +31,16 @@ if $pass_direct_input; then
 	if $verbose; then
 		>&2 echo "pid is $pid"
 	fi
-    # output PID and wait for command to finish
-    echo "$pid" > "$pid_path"
-    if $verbose; then
-        >&2 echo "waiting for $pid to exit"
-    fi
-    wait $pid
-    result=$?
+	# output PID and wait for command to finish
+	echo "$pid" > "$pid_path"
+	if $verbose; then
+		>&2 echo "waiting for $pid to exit"
+	fi
+	wait $pid
+	result=$?
 else
 	"$@" 1>"$stdout_path" 2>"$stderr_path"
-    result=$?
+	result=$?
 fi
 
 # output and store result

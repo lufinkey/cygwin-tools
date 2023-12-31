@@ -252,12 +252,16 @@ if $pass_direct_input; then
 fi
 
 # command has finished
-cmd_result=$(cat "$result_path")
-if $verbose; then
-	>&2 echo "finished command with result $cmd_result"
-	>&2 echo "deleting temporary result file"
+if [ $cygstart_result -eq 0 ]; then
+	cmd_result=$(cat "$result_path")
+	if $verbose; then
+		>&2 echo "finished command with result $cmd_result"
+		>&2 echo "deleting temporary result file"
+	fi
+	rm -rf "$result_path"
+else
+	cmd_result=$cygstart_result
 fi
-rm -rf "$result_path"
 
 # stop tailing stdout and stderr of command
 sleep "$sleep_duration"
