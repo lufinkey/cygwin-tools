@@ -1,11 +1,29 @@
 #!/bin/bash
 
-cmd_id="$1"
+eval "$1"
 shift
 
+# announce launch
+if $verbose; then
+    >&2 echo -e "cygsudo.real launched\n\tPATH=$PATH\n\tUID=$UID"
+fi
+
+# prepend to path
+if $verbose; then
+    >&2 echo "prepending default binary directories to the base of the path"
+fi
 export PATH="/usr/local/bin:/usr/bin:$PATH"
 
+# execute command
+if $verbose; then
+    >&2 echo "executing" "$@"
+fi
 "$@" 1>"/tmp/cygsudo_cmd_stdout_$cmd_id.log" 2>"/tmp/cygsudo_cmd_stdout_$cmd_id.log"
 result=$?
 
-echo "$result" > "/tmp/cygsudo_cmd_result_$cmd_id"
+# store result
+result_file="/tmp/cygsudo_cmd_result_$cmd_id"
+if $verbose; then
+    >&2 echo "storing result $result in $result_file"
+fi
+echo "$result" > "$result_file"

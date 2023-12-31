@@ -2,11 +2,120 @@
 self_script_path=$(realpath "${BASH_SOURCE[0]}")
 admin_script_path="$self_script_path.real"
 
+# get mintty path
+mintty_path=$(cygpath -w "$(which mintty)")
+
+# helper functions
+function strindex() {
+	str="$1"
+	find_str="$2"
+	start_index=$3
+	if [ ! -z "$start_index"]; then
+		str="${str:$start_index}"
+	fi
+	x="${str%%"$find_str"*}"
+	if [[ "$x" = "$str" ]]; then
+		echo -1
+	elif [ ! -z "$start_index" ]; then
+		echo $(($start_index + ${#x}))
+	else
+		echo ${#x}
+	fi
+}
+
+function parse_bool_arg() {
+	val="$1"
+	if [ "$val" -eq 0 ] || [ "$val" = "false" ] || [ "$val" = "no"]; then
+		echo "false"
+	elif [ "$val" -eq 1 ] || [ "$val" = "true" ] || [ "$val" = "yes" ]; then
+		echo "true"
+	elif [ "$2" = "strict" ]; then
+		>&2 echo "invalid boolean $val"
+		echo "false"
+		return 1
+	else
+		echo "$val"
+	fi
+}
+
 # create random string to help prevent clashing with other sudo calls
 randomstr=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
 
-# get mintty path
-mintty_path=$(cygpath -w "$(which mintty)")
+# set default values for options
+verbose=false
+test_mode=false
+
+# parse arguments
+param_count=0
+while (( $# > 0 )); do
+	param_count=$((param_count + 1))
+	arg="$1"
+	trimmed_arg="${arg#"${arg%%[![:space:]]*}"}"
+	trimmed_arg="${trimmed_arg%"${trimmed_arg##*[![:space:]]}"}"
+	# ignore empty parameter
+	if [ -z "$trimmed_arg" ]; then
+		>&2 echo "ignoring empty parameter at position $param_count"
+		shift
+		continue
+	fi
+	# parse flags
+	if [[ "$arg" == --* ]]; then
+		# parse named flag
+		flag="${arg:2}"
+		if [ -z "$flag" ]; then
+			# argument was -- so stop parsing arguments
+			shift
+			break
+		fi
+		# check for value
+		eq_index=$(strindex "$flag" "=")
+		if [ "$eq_index" -eq -1 ]; then
+			flag_name="$flag"
+			has_flag_val=false
+			flag_val=
+		else
+			flag_name="${flag:0:$eq_index}"
+			has_flag_val=true
+			flag_val="${flag:$eq_index}"
+		fi
+		if [ "$flag_name" = "verbose" ]; then
+			if $has_flag_val; then
+				verbose="$(parse_bool_arg "$flag_val" 'strict')"
+			else
+				verbose=true
+			fi
+		elif [ "$flag_name" = "test" ]; then
+			if $has_flag_val; then
+				test_mode="$(parse_bool_arg "$flag_val")"
+			else
+				test_mode=true
+			fi
+		else
+			>&2 echo "unknown argument '$arg'"
+		fi
+	elif [[ "$arg" == -* ]]; then
+		# parse single character flags
+		arg_len=${#arg}
+		if [ $arg_len -gt 1 ]; then
+			for ((i = 1 ; i < arg_len ; i++ )); do
+				flag="${arg:$i:1}"
+				if [ "$flag" = "v" ]; then
+					verbose=true
+				else
+					>&2 echo "unknown flag '$flag'"
+				fi
+			done
+		else
+			# got empty flag, so stop parsing arguments
+			shift
+			break
+		fi
+	else
+		# reached the command section of the arguments
+		break
+	fi
+	shift
+done
 
 # create temporary batch file to escape command parameters for ShellExecute
 cmd_escaper="/tmp/cygsudo_cmd_escaper_$randomstr.bat"
@@ -15,26 +124,45 @@ cat > "$cmd_escaper" << EOF
 @echo OFF
 setlocal ENABLEEXTENSIONS
 setlocal enableDelayedExpansion
-set "ESC_ARG=%1"
-@echo|set /p="%ESC_ARG%"
+@echo|set /p="%1"
 EOF
 # ensure temporary script is executable
 chmod +x "$cmd_escaper"
 
+# make a multiline string of the variables to pass
+passvars_arg="cmd_id=\"$randomstr\" verbose=\"$verbose\" test_mode=\"$test_mode\""
+# passvars_arg="$("$cmd_escaper" "$passvars_arg")"
+if $verbose; then
+	>&2 echo "passed variables argument is:"
+	>&2 echo -e "\t$passvars_arg"
+fi
+
 # escape command arguments
 esc_args=()
-esc_args+=("$admin_script_path")
-esc_args+=("$randomstr")
+esc_args+=( "$(printf "%q" "$admin_script_path")" )
+esc_args+=( "$( printf "%q" "$passvars_arg" )" )
 for arg in "$@"
 do
-	esc_arg=$(printf "%q" "$arg")
-	esc_args+=("$esc_arg")
+	esc_arg=$( printf "%q" "$arg" )
+	esc_args+=( "$esc_arg" )
 done
-args=$(echo "${esc_args[*]}")
-args=$("$cmd_escaper" "$args")
+command=$(echo "${esc_args[*]}")
+# command="${command//=/\^=}"
+if $verbose; then
+	>&2 echo "joined command is:"
+	>&2 echo -e "\t$command"
+fi
+command=$("$cmd_escaper" "$command")
 
 # delete temporary batch file
 rm -rf "$cmd_escaper"
+
+# echo command if in test mode
+if $test_mode; then
+	>&2 echo "the following command would be executed:"
+	>&2 echo -e "\t$command"
+	exit
+fi
 
 # tail the command's stdout and stderr
 stdout_path="/tmp/cygsudo_cmd_stdout_$randomstr.log"
@@ -42,20 +170,50 @@ stderr_path="/tmp/cygsudo_cmd_stderr_$randomstr.log"
 result_path="/tmp/cygsudo_cmd_result_$randomstr"
 touch "$stdout_path"
 touch "$stderr_path"
+if $verbose; then
+	>&2 echo "created temporary files to tail for stdout and stderr"
+	>&2 echo "stdout file is $stdout_path"
+	>&2 echo "stderr file is $stderr_path"
+fi
 tail -f -s 0.1 "$stdout_path" &
 tail_s_pid=$!
+if $verbose; then
+	>&2 echo "tailing temporary stdout file $stdout_path (tail pid is $tail_s_pid)"
+fi
 tail -f -s 0.1 "$stderr_path" 1>&2 &
 tail_e_pid=$!
+if $verbose; then
+	>&2 echo "tailing temporary stderr file $stderr_path (tail pid is $tail_e_pid)"
+fi
 
 # run command
-cygstart -w -d "$PWD" --action=runas "$mintty_path" -i /Cygwin-Terminal.ico --dir "" --exec "/bin/sh" -c "$args"
+cygstart_args=()
+if $verbose; then
+	cygstart_args+=( "--verbose" )
+	>&2 echo "running command via cygstart:"
+	>&2 echo -e "\t$command"
+fi
+cygstart --wait --directory "$PWD" "$cygstart_args" --action=runas "$mintty_path" -i /Cygwin-Terminal.ico --dir "" --exec "/bin/sh" -c "$command"
+cygstart_result=$?
+if $verbose; then
+	>&2 echo "cygstart exited with result $cygstart_result"
+fi
 
 # wait for command result
+if $verbose; then
+	>&2 echo "waiting for command result in temporary file $result_path"
+fi
 while [ ! -f "$result_path" ]
 do
 	sleep 0.1s
 done
+
+# command has finished
 cmd_result=$(cat "$result_path")
+if $verbose; then
+	>&2 echo "finished command with result $cmd_result"
+	>&2 echo "deleting temporary result file $result_path"
+fi
 rm -rf "$result_path"
 
 # stop tailing stdout and stderr of command
@@ -66,6 +224,9 @@ kill -15 $tail_e_pid &> /dev/null
 wait $tail_e_pid &> /dev/null
 
 # delete stdout and stderr files
+if $verbose; then
+	>&2 echo "deleting temporary stdout and stderr files"
+fi
 rm -rf "$stdout_path"
 rm -rf "$stderr_path"
 
