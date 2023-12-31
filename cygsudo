@@ -1,19 +1,31 @@
 #!/bin/bash
 self_script_path=$(realpath "${BASH_SOURCE[0]}")
+self_script_dir=$(dirname "$self_script_path")
 admin_script_path="$self_script_path.real"
 
-# get mintty path
+# get mintty and cygwin paths
 mintty_path=$(cygpath -w "$(which mintty)")
+cygwin_root=$(cygpath -w "/")
+batch_escaper_name="escape-batch-param.bat"
+batch_escaper_path="$self_script_dir/$batch_escaper_name"
+if [ ! -f "$batch_escaper_path" ]; then
+	if which "$batch_escaper_name"; then
+		batch_escaper_path=$batch_escaper_name
+	else
+		batch_escaper_path=
+	fi
+fi
+
 
 # helper functions
 function strindex() {
-	str="$1"
-	find_str="$2"
-	start_index=$3
+	local str="$1"
+	local find_str="$2"
+	local start_index=$3
 	if [ ! -z "$start_index"]; then
 		str="${str:$start_index}"
 	fi
-	x="${str%%"$find_str"*}"
+	local x="${str%%"$find_str"*}"
 	if [[ "$x" = "$str" ]]; then
 		echo -1
 	elif [ ! -z "$start_index" ]; then
@@ -21,6 +33,23 @@ function strindex() {
 	else
 		echo ${#x}
 	fi
+}
+
+function string_index_in_array() {
+	local index=0
+	local str_to_find="$1"
+	shift
+	for entry in "$@"; do
+		if $verbose; then
+			>&2 echo "checking $entry at $index"
+		fi
+		if [ "$entry" == "$str_to_find" ]; then
+			echo $index
+			return
+		fi
+		index=$((index+1))
+	done
+	echo -1
 }
 
 function parse_bool_arg() {
@@ -45,13 +74,15 @@ cmd_id=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
 verbose=false
 test_mode=false
 wait_on_finish=false
-forward_stdin=false
+stdin_mode="none"
+stdin_modes=( "none" "pipe" "file" )
 sleep_duration="0.1s"
+with_mintty=false
 
 # parse arguments
 param_count=0
 while (( $# > 0 )); do
-	param_count=$((param_count + 1))
+	param_count=$((param_count+1))
 	arg="$1"
 	trimmed_arg="${arg#"${arg%%[![:space:]]*}"}"
 	trimmed_arg="${trimmed_arg%"${trimmed_arg##*[![:space:]]}"}"
@@ -79,7 +110,7 @@ while (( $# > 0 )); do
 		else
 			flag_name="${flag:0:$eq_index}"
 			has_flag_val=true
-			flag_val="${flag:$eq_index}"
+			flag_val="${flag:(($eq_index+1))}"
 		fi
 		if [ "$flag_name" = "verbose" ]; then
 			if $has_flag_val; then
@@ -99,14 +130,25 @@ while (( $# > 0 )); do
 			else
 				wait_on_finish=true
 			fi
-		elif [ "$flag_name" = "forward-stdin" ]; then
-			if $has_flag_val; then
-				forward_stdin="$(parse_bool_arg "$flag_val")"
+		elif [ "$flag_name" = "stdin-mode" ]; then
+			if ! $has_flag_val; then
+				>&2 echo "missing value for flag $arg"
+				exit 1
+			elif [ $( string_index_in_array "$flag_val" "${stdin_modes[@]}" ) -eq -1 ]; then
+				>&2 echo "invalid stdin mode $flag_val"
+				exit 1
 			else
-				forward_stdin=true
+				stdin_mode="$flag_val"
+			fi
+		elif [ "$flag_name" = "with-mintty" ]; then
+			if $has_flag_val; then
+				with_mintty="$(parse_bool_arg "$flag_val")"
+			else
+				with_mintty=true
 			fi
 		else
 			>&2 echo "unknown argument '$arg'"
+			exit 1
 		fi
 	elif [[ "$arg" == -* ]]; then
 		# parse single character flags
@@ -118,12 +160,13 @@ while (( $# > 0 )); do
 					verbose=true
 				else
 					>&2 echo "unknown flag '$flag'"
+					exit 1
 				fi
 			done
 		else
 			# got empty flag, so stop parsing arguments
-			shift
-			break
+			>&2 echo "unused empty flag '$arg'"
+			exit 1
 		fi
 	else
 		# reached the command section of the arguments
@@ -132,26 +175,14 @@ while (( $# > 0 )); do
 	shift
 done
 
-# create temporary batch file to escape command parameters for ShellExecute
-cmd_escaper="/tmp/cygsudo_cmd_escaper_$cmd_id.bat"
-# write script content into temporary file
-cat > "$cmd_escaper" << EOF
-@echo OFF
-setlocal ENABLEEXTENSIONS
-setlocal enableDelayedExpansion
-@echo|set /p="%1"
-EOF
-# ensure temporary script is executable
-chmod +x "$cmd_escaper"
-
 # make a multiline string of the variables to pass
-passvars_arg="cmd_id=\"$cmd_id\" verbose=\"$verbose\" test_mode=\"$test_mode\" wait_on_finish=\"$wait_on_finish\" use_forwarded_stdin=\"$forward_stdin\""
+passvars_arg="cmd_id=\"$cmd_id\" verbose=\"$verbose\" test_mode=\"$test_mode\" wait_on_finish=\"$wait_on_finish\" stdin_mode=\"$stdin_mode\""
 if $verbose; then
 	>&2 echo "passed variables argument is:"
-	>&2 echo -e "\t$passvars_arg"
+	>&2 echo $'\t'"$passvars_arg"
 fi
 
-# escape command arguments
+# escape command + arguments
 esc_args=()
 esc_args+=( "$(printf "%q" "$admin_script_path")" )
 esc_args+=( "$( printf "%q" "$passvars_arg" )" )
@@ -163,18 +194,19 @@ done
 command=$(echo "${esc_args[*]}")
 # command="${command//=/\^=}"
 if $verbose; then
-	>&2 echo "joined command is:"
-	>&2 echo -e "\t$command"
+	>&2 echo "joined command (before escaping) is:"
+	>&2 echo $'\t'"$command"
 fi
-command=$("$cmd_escaper" "$command")
-
-# delete temporary batch file
-rm -rf "$cmd_escaper"
+if [ -z "$batch_escaper_path" ]; then
+	>&2 echo "Couldn't find $batch_escaper_name to escape shell parameters"
+	exit 1
+fi
+command=$("$batch_escaper_path" "$command")
 
 # echo command if in test mode
 if $test_mode; then
 	>&2 echo "the following command would be executed:"
-	>&2 echo -e "\t$command"
+	>&2 echo $'\t'"$command"
 	exit
 fi
 
@@ -184,7 +216,7 @@ stdin_path="/tmp/cygsudo_cmd_stdin_$cmd_id"
 stdout_path="/tmp/cygsudo_cmd_stdout_$cmd_id.log"
 stderr_path="/tmp/cygsudo_cmd_stderr_$cmd_id.log"
 result_path="/tmp/cygsudo_cmd_result_$cmd_id"
-if $forward_stdin; then
+if [ "$stdin_mode" == "file" ]; then
 	touch "$stdin_path"
 fi
 touch "$stdout_path"
@@ -206,26 +238,33 @@ if $verbose; then
 	>&2 echo "tailing temporary stderr file $stderr_path (tail pid is $tail_e_pid)"
 fi
 
+# pipe stdin to chosen destination if needed
+if [ "$stdin_mode" == "file" ]; then
+	{ stdbuf -o0 cat - <&3 3<&- 1>"$stdin_path" 2>/dev/null & } 3<&0
+fi
+
 # run command
 cygstart_args=()
 if $verbose; then
 	cygstart_args+=( "--verbose" )
 	>&2 echo "running command via cygstart:"
-	>&2 echo -e "\t$command"
+	>&2 echo $'\t'"$command"
 fi
-cygstart --wait --directory "$PWD" $cygstart_args --action=runas "$mintty_path" -i /Cygwin-Terminal.ico --dir "" --exec "/bin/sh" -c "$command"
-cygstart_result=$?
+if $with_mintty; then
+	cygstart --wait --directory "$PWD" $cygstart_args --action=runas "$mintty_path" -i /Cygwin-Terminal.ico --dir "" --exec "/bin/sh" -c "$command"
+	cygstart_result=$?
+else
+	cygstart --wait --directory "$PWD" $cygstart_args --action=runas "$cygwin_root\\bin\\sh" -c "$command"
+	cygstart_result=$?
+fi
 if $verbose; then
 	>&2 echo "cygstart exited with result $cygstart_result"
 fi
 
 # check if cygstart was successful
 if [ $cygstart_result -eq 0 ]; then
-	# pipe stdin to temporary file if needed
-	if $forward_stdin; then
-		{ stdbuf -o0 cat - <&3 3<&- 1>"$stdin_path" 2>/dev/null & } 3<&0
-
-		# wait for pid
+	# wait for pid if needed
+	if $with_mintty; then
 		if $verbose; then
 			>&2 echo "waiting for pid in temporary file $pid_path"
 		fi
@@ -247,7 +286,7 @@ if [ $cygstart_result -eq 0 ]; then
 fi
 
 # close stdin if needed
-if $forward_stdin; then
+if [ "$stdin_mode" == "file" ]; then
 	exec 0<&-
 fi
 

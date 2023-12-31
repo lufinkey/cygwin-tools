@@ -25,7 +25,7 @@ export PATH="/usr/local/bin:/usr/bin:$PATH"
 if $verbose; then
 	>&2 echo "executing" "$@"
 fi
-if $use_forwarded_stdin; then
+if [ "$stdin_mode" == "file" ]; then
 	tail -f -s 0.1 -n +1 "$stdin_path" | stdbuf -i0 "$@" 1>"$stdout_path" 2>"$stderr_path" &
 	pid=$!
 	if $verbose; then
